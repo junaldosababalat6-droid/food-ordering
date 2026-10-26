@@ -44,6 +44,12 @@ export const Navbar = () => {
             <Clock size={18} />
             <span>{t.status}</span>
           </Link>
+          <Link
+            to="/notes"
+            className={`nav-link ${location.pathname === "/notes" ? "active" : ""}`}
+          >
+            {t.notes}
+          </Link>
           </>
         )}
 

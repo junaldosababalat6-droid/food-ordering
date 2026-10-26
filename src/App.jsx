@@ -8,18 +8,22 @@ import { CartPage } from "./pages/CartPage";
 import { CheckoutPage } from "./pages/CheckoutPage";
 import { OrderConfirmationPage } from "./pages/OrderConfirmationPage";
 import { HistoryPage } from "./pages/HistoryPage";
+import { NotesPage } from "./pages/NotesPage";
 import { AdminLoginPage } from "./pages/AdminLoginPage";
 import { AdminDashboardPage } from "./pages/AdminDashboardPage";
 import { AdminMenuPage } from "./pages/AdminMenuPage";
 import "./index.css";
 
 const ProtectedAdminRoute = ({ children }) => {
-  const { adminUser } = useApp();
+  const { adminUser, adminAuthLoading } = useApp();
+  if (adminAuthLoading) {
+    return <p role="status" style={{ padding: "24px", textAlign: "center" }}>Checking admin session...</p>;
+  }
   return adminUser ? children : <Navigate to="/admin/login" replace />;
 };
 
 const AppRoutes = () => {
-  const { adminUser } = useApp();
+  const { adminUser, adminAuthLoading } = useApp();
 
   return (
     <div className="app-container">
@@ -32,7 +36,19 @@ const AppRoutes = () => {
           <Route path="/checkout" element={<CheckoutPage />} />
           <Route path="/order-confirmation/:orderId" element={<OrderConfirmationPage />} />
           <Route path="/history" element={<HistoryPage />} />
-          <Route path="/admin/login" element={adminUser ? <Navigate to="/admin/dashboard" replace /> : <AdminLoginPage />} />
+          <Route path="/notes" element={<NotesPage />} />
+          <Route
+            path="/admin/login"
+            element={
+              adminAuthLoading ? (
+                <p role="status" style={{ padding: "24px", textAlign: "center" }}>Checking admin session...</p>
+              ) : adminUser ? (
+                <Navigate to="/admin/dashboard" replace />
+              ) : (
+                <AdminLoginPage />
+              )
+            }
+          />
           <Route
             path="/admin/dashboard"
             element={

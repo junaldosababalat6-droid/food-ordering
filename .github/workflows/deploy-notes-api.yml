@@ -1,0 +1,70 @@
+name: Deploy Notes API to Cloudflare
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "notes-api/**"
+      - ".github/workflows/deploy-notes-api.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: notes-api-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: notes-api
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: notes-api/package-lock.json
+
+      - name: Install API deployment dependencies
+        run: npm ci
+
+      - name: Validate deployment configuration
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Set the CLOUDFLARE_API_TOKEN repository secret."; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::Set the CLOUDFLARE_ACCOUNT_ID repository variable."; exit 1; }
+          test -n "$D1_DATABASE_ID" || { echo "::error::Set the CLOUDFLARE_D1_DATABASE_ID repository variable."; exit 1; }
+          test -n "$JWT_SECRET" || { echo "::error::Set the JWT_SECRET repository secret."; exit 1; }
+          test "${#JWT_SECRET}" -ge 32 || { echo "::error::JWT_SECRET must contain at least 32 characters."; exit 1; }
+          [[ "$D1_DATABASE_ID" =~ ^[0-9a-fA-F-]{36}$ ]] || { echo "::error::CLOUDFLARE_D1_DATABASE_ID must be a UUID."; exit 1; }
+
+      - name: Configure D1 binding
+        run: |
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            const path = "wrangler.jsonc";
+            const config = readFileSync(path, "utf8");
+            const placeholder = "\"database_id\": \"00000000-0000-0000-0000-000000000000\"";
+            if (!config.includes(placeholder)) throw new Error("Expected D1 database placeholder was not found.");
+            writeFileSync(path, config.replace(placeholder, `"database_id": "${process.env.D1_DATABASE_ID}"`));
+          '
+
+      - name: Apply D1 migrations
+        run: npx wrangler d1 migrations apply food-ordering-notes --remote
+
+      - name: Deploy Notes API
+        run: npx wrangler deploy
+
+      - name: Configure JWT signing secret
+        run: printf '%s' "$JWT_SECRET" | npx wrangler secret put JWT_SECRET

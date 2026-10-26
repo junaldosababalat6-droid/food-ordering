@@ -2,6 +2,9 @@ import React, { createContext, useContext, useState, useEffect } from "react";
 import { initialMenuItems, initialCategories, initialOrders } from "../data/initialData";
 import { translations } from "../translations/translations";
 
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+const ADMIN_TOKEN_KEY = "bite_dash_admin_token";
+
 const restoreMenuTranslations = (item) => {
   const initialItem = initialMenuItems.find((menuItem) => menuItem.id === item.id);
   return {
@@ -145,11 +148,58 @@ export const AppProvider = ({ children }) => {
     localStorage.setItem("bite_dash_orders", JSON.stringify(orders));
   }, [orders]);
 
-  // Admin User State
-  const [adminUser, setAdminUser] = useState(() => {
-    const saved = localStorage.getItem("bite_dash_admin");
-    return saved ? JSON.parse(saved) : null;
-  });
+  // Admin authentication
+  const [adminUser, setAdminUser] = useState(null);
+  const [adminAuthLoading, setAdminAuthLoading] = useState(() => Boolean(localStorage.getItem(ADMIN_TOKEN_KEY)));
+  const [adminAuthError, setAdminAuthError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    const token = localStorage.getItem(ADMIN_TOKEN_KEY);
+
+    if (!token) {
+      return () => {
+        active = false;
+      };
+    }
+
+    fetch(`${API_URL}/api/admin/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) {
+          const error = new Error(data.error || "Admin session is no longer valid.");
+          error.status = response.status;
+          throw error;
+        }
+        return data;
+      })
+      .then((admin) => {
+        if (active) {
+          setAdminUser({ username: admin.username });
+          setAdminAuthError("");
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          if (error.status === 401 || error.status === 403) {
+            localStorage.removeItem(ADMIN_TOKEN_KEY);
+          }
+          setAdminUser(null);
+          setAdminAuthError(error instanceof Error ? error.message : "Could not verify admin session.");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setAdminAuthLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Current Customer Name State
   const [customerName, setCustomerNameState] = useState(() => {
@@ -161,18 +211,31 @@ export const AppProvider = ({ children }) => {
     localStorage.setItem("bite_dash_customer_name", name);
   };
 
-  const loginAdmin = (username, password) => {
-    if (username === "group13" && password === "group13") {
-      const user = { username };
-      setAdminUser(user);
-      localStorage.setItem("bite_dash_admin", JSON.stringify(user));
+  const loginAdmin = async (username, password) => {
+    try {
+      const response = await fetch(`${API_URL}/api/admin/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        return { success: false, message: data.error || translations[language].loginError };
+      }
+
+      localStorage.setItem(ADMIN_TOKEN_KEY, data.token);
+      setAdminUser({ username: data.username });
+      setAdminAuthError("");
       return { success: true };
+    } catch {
+      return { success: false, message: "Cannot reach the admin API. Check that the backend is running." };
     }
-    return { success: false, message: translations[language].loginError };
   };
 
   const logoutAdmin = () => {
     setAdminUser(null);
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
     localStorage.removeItem("bite_dash_admin");
   };
 
@@ -295,6 +358,8 @@ const placeOrder = (orderDetails) => {
         categories,
         orders,
         adminUser,
+        adminAuthLoading,
+        adminAuthError,
         loginAdmin,
         logoutAdmin,
         placeOrder,
